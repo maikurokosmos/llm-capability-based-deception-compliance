@@ -11,10 +11,18 @@ def extract_activations(
     model,
     tokenizer,
     device: str,
+    max_length: int = 8192,
 ) -> np.ndarray:
     """
     Run a single forward pass on (prompt + response) and extract the hidden state
     at the last token position for every transformer layer.
+
+    `output_hidden_states=True` keeps every layer's hidden state for the whole
+    sequence, so a single pathological row — e.g. a degenerate greedy-decoding
+    repetition running to tens of thousands of tokens — can exhaust VRAM on any card.
+    `max_length` caps that. Truncation is LEFT-side so the genuine final token (the
+    position we read) is preserved; legitimate rows sit far below the cap and are
+    never touched.
 
     Returns
     -------
@@ -30,7 +38,11 @@ def extract_activations(
         messages, add_generation_prompt=True, tokenize=False
     )
     full_text = prompt_text + response
-    input_ids = tokenizer(full_text, return_tensors="pt").input_ids.to(device)
+    tokenizer.truncation_side = "left"
+    input_ids = tokenizer(
+        full_text, return_tensors="pt",
+        truncation=True, max_length=max_length,
+    ).input_ids.to(device)
 
     with torch.no_grad():
         outputs = model(input_ids, output_hidden_states=True)
@@ -42,6 +54,41 @@ def extract_activations(
     # Take the last token position from each layer → (n_layers, hidden_dim)
     activations = torch.stack([hs[0, -1, :] for hs in hidden_states])
     return activations.cpu().float().numpy()
+
+
+def count_prompt_tokens(question, response, system_prompt, tokenizer) -> int:
+    """Token length of the exact (prompt + response) string extract_activations() feeds
+    the model — used to filter degenerate ultra-long rows before extraction."""
+    messages = [
+        {"role": "system", "content": str(system_prompt)},
+        {"role": "user",   "content": str(question)},
+    ]
+    prompt_text = tokenizer.apply_chat_template(
+        messages, add_generation_prompt=True, tokenize=False
+    )
+    return len(tokenizer(prompt_text + str(response)).input_ids)
+
+
+def drop_overlong_rows(probe_dataset, tokenizer, max_length: int, response_col: str = "response"):
+    """Drop rows whose tokenized (prompt + response) exceeds max_length.
+
+    Targets degenerate generations — e.g. a greedy-decoding repetition loop running to
+    tens of thousands of tokens — which would OOM extraction (output_hidden_states keeps
+    every layer's hidden state for the whole sequence) and are junk data anyway. Order is
+    preserved; returns a reindexed copy and prints what was removed.
+    """
+    n_tok = np.array([
+        count_prompt_tokens(r.question, getattr(r, response_col), r.system_prompt, tokenizer)
+        for r in probe_dataset.itertuples()
+    ])
+    keep = n_tok <= max_length
+    n_drop = int((~keep).sum())
+    if n_drop:
+        print(f"[filter] dropped {n_drop} row(s) > {max_length} tokens "
+              f"(longest was {int(n_tok.max())}); kept {int(keep.sum())}/{len(probe_dataset)}")
+    else:
+        print(f"[filter] no rows exceed {max_length} tokens; kept all {len(probe_dataset)}")
+    return probe_dataset[keep].reset_index(drop=True)
 
 
 LABEL_MAP = {
@@ -67,6 +114,7 @@ def run_extract_activations(
     hf_repo: str,
     hf_token: str,
     checkpoint_every: int = 50,
+    max_length: int = 8192,
 ):
     """
     Load or extract activations for all rows in probe_dataset.
@@ -148,6 +196,7 @@ def run_extract_activations(
             model=model,
             tokenizer=tokenizer,
             device=device,
+            max_length=max_length,
         ))
         all_labels.append(LABEL_MAP[row.label])
 
