@@ -6,40 +6,27 @@ __pycache__/
 # Jupyter
 .ipynb_checkpoints/
 
-# Large files — too big for GitHub (on HuggingFace Hub instead)
-# Two-level:   outputs/{model_slug}/
-# Three-level: outputs/{model_slug}/{prompt_variant}/
-outputs/*/activations.npy
-outputs/*/activations_pca*.npy
-outputs/*/pca*_components.npy
-outputs/*/activations_checkpoint.npz
-outputs/*/labels.npy
-outputs/*/*/activations.npy
-outputs/*/*/activations_pca*.npy
-outputs/*/*/pca*_components.npy
-outputs/*/*/activations_checkpoint.npz
-outputs/*/*/labels.npy
+# Large files — too big for GitHub (kept on HuggingFace Hub instead).
+# `outputs/**/<name>` matches at ANY depth — outputs/{model}/[{thinking}/]{deception_prompt}/...
+# — so adding new directory levels never leaks these again.
+outputs/**/activations.npy
+outputs/**/activations_pca*.npy
+outputs/**/pca*_components.npy
+outputs/**/activations_checkpoint.npz
+outputs/**/labels.npy
 
 # Supplement configs (additional_experiment.ipynb) — distinct filenames, same folders
-outputs/*/activations_additional_config*.npy
-outputs/*/labels_additional_config.npy
-outputs/*/activations_additional_config_checkpoint.npz
-outputs/*/pca*_components_additional_config.npy
-outputs/*/*/activations_additional_config*.npy
-outputs/*/*/labels_additional_config.npy
-outputs/*/*/activations_additional_config_checkpoint.npz
-outputs/*/*/pca*_components_additional_config.npy
+outputs/**/activations_additional_config*.npy
+outputs/**/labels_additional_config.npy
+outputs/**/activations_additional_config_checkpoint.npz
+outputs/**/pca*_components_additional_config.npy
 
 # HuggingFace download cache
 .cache/
-outputs/*/.cache/
-outputs/*/*/.cache/
+outputs/**/.cache/
 
-# Probe checkpoints (intermediate, not needed in git)
-# Two-level:   outputs/{model_slug}/{probe_type}/
-# Three-level: outputs/{model_slug}/{prompt_variant}/{probe_type}/
-outputs/*/*/checkpoint_*.pkl
-outputs/*/*/*/checkpoint_*.pkl
+# Probe checkpoints (intermediate pickles, not needed in git) — at any depth
+outputs/**/checkpoint_*.pkl
 
 # Per-model data (not in git — too large or model-specific)
 # Structure: data/dataset/{model_slug}/{prompt_variant}/responses/

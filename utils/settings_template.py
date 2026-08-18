@@ -4,18 +4,27 @@ from utils.prompt_registry import NEUTRAL_PROMPTS, DECEPTION_PROMPTS
 # ── Model ─────────────────────────────────────────────────────────────────────
 
 # HuggingFace model ID used for loading weights
-# MODEL_ID = "Qwen/Qwen3-4B-Thinking-2507"
-# MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"  # smaller model for testing
-# MODEL_ID = "google/gemma-4-E4B-it"  # switch back to larger model for final runs
+# MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
+# MODEL_ID = "google/gemma-4-E4B-it"
 MODEL_ID = "Qwen/Qwen3-4B"
 
 # Slug derived from model ID — used as subfolder name under data/dataset/ and outputs/
-MODEL_SLUG = MODEL_ID.split("/")[-1].lower()  # "qwen2.5-7b-instruct"
+MODEL_SLUG = MODEL_ID.split("/")[-1].lower()  # e.g. "qwen3-4b"
 
-# Run variant sub-folder (deception prompt slug for qwen2.5, thinking mode for gemma-4, "" for flat models)
-DECEPTION_PROMPT_IDX = 0  # 0 = original_deception_prompt, 1 = debate_framing_deception_prompt
-RUN_SLUG = ""  # e.g. "original_deception_prompt" / "debate_framing_deception_prompt" / "non_thinking_mode" / ""
-_run_parts = [MODEL_SLUG] + ([RUN_SLUG] if RUN_SLUG else [])
+# Per-run sub-folders under the model:  <model>/<thinking>/<deception_prompt>/...
+# Thinking-mode variant — for models with a think/no-think split (Qwen3, Gemma-4); "" for
+# models without one (Qwen2.5). Placed ABOVE the deception-prompt level so future prompt
+# variants group tidily under each thinking mode.
+THINKING_SLUG = ""   # "" | "non_thinking_mode" | "thinking_mode"
+# Deception-prompt variant: IDX picks the actual prompt (FACTUAL_DECEPTION_SCENARIO below);
+# the index-aligned slug names the sub-folder. Add future variants (e.g. roleplay) to BOTH
+# DECEPTION_PROMPTS (prompt_registry) and DECEPTION_PROMPT_SLUGS, keeping them aligned.
+DECEPTION_PROMPT_IDX   = 0  # 0 = original, 1 = debate_framing
+DECEPTION_PROMPT_SLUGS = ["original_deception_prompt", "debate_framing_deception_prompt"]
+DECEPTION_PROMPT_SLUG  = DECEPTION_PROMPT_SLUGS[DECEPTION_PROMPT_IDX]
+_run_parts = [MODEL_SLUG] + [s for s in (THINKING_SLUG, DECEPTION_PROMPT_SLUG) if s]
+# Combined slug for display / back-compat — e.g. "non_thinking_mode/original_deception_prompt"
+RUN_SLUG = "/".join(_run_parts[1:])
 
 # PyTorch device — RTX 4090 required (Blackwell GPUs incompatible with PyTorch 2.4.x)
 DEVICE = "cuda"
@@ -51,7 +60,7 @@ _OUTPUT_ROOT = Path("outputs")
 DECEPTION_DATASET_PATH = _DATA_ROOT / "deception_dataset.csv"
 GEMMA4_DATASET_PATH = _DATA_ROOT / "deception_dataset_gemma4_thinking.csv"
 
-# Per-run data directory (MODEL_SLUG / RUN_SLUG if set, else MODEL_SLUG)
+# Per-run data directory: data/dataset/<model>/[<thinking>/]<deception_prompt>
 DATA_DIR = _DATA_ROOT.joinpath(*_run_parts)
 
 # Knowledge test results — shared across runs of the same model
@@ -124,7 +133,7 @@ CASCADED_MLP_PATH = CASCADED_MLP_DIR / "probe_results_cascaded_mlp.csv"
 #   A / 0 → natural_deception    (passed KC, neutral prompt, all-wrong)
 #   B / 6 → capable_failed       (failed KC, neutral prompt, all-right)
 #   C / 6 → deception_rejection  (passed KC, deceptive prompt, all-right)
-# NOTE: deception_rejection (C/6) depends on the deception-prompt variant (RUN_SLUG);
+# NOTE: deception_rejection (C/6) depends on the deception-prompt variant (DECEPTION_PROMPT_SLUG);
 #       the two neutral classes barely differ across variants.
 SUPPLEMENT_LABEL_RULES = [
     ("A", 0, "natural_deception"),
@@ -151,6 +160,22 @@ SUPPLEMENT_PCA_VARIANCE_PATH    = OUTPUT_DIR / f"pca{PCA_K}_explained_variance_a
 # targeted binaries replace the cascaded design.
 SUPPLEMENT_MULTICLASS_LR_DIR = OUTPUT_DIR / "additional_config_multiclass_lr"
 SUPPLEMENT_BINARY_LR_DIR     = OUTPUT_DIR / "additional_config_binary_lr"
+
+# ── Figures (paper) ───────────────────────────────────────────────────────────
+# Each a separate vector PDF (kept apart from base-experiment figures). Per-layer line
+# plots use RELATIVE layer depth on the x-axis so they stay comparable across models with
+# different layer counts (qwen2.5 → qwen3 → gemma-4).
+SUPPLEMENT_FIGURES_DIR        = OUTPUT_DIR / "additional_config_figures"
+SUPPLEMENT_FIG_BINARY_AUROC   = SUPPLEMENT_FIGURES_DIR / "binary_auroc_by_depth.pdf"
+SUPPLEMENT_FIG_MACRO_F1       = SUPPLEMENT_FIGURES_DIR / "multiclass_macro_f1_by_depth.pdf"
+SUPPLEMENT_FIG_CM_NEUTRAL_2X2 = SUPPLEMENT_FIGURES_DIR / "confusion_neutral_2x2_best_layer.pdf"
+SUPPLEMENT_FIG_CM_ALL_CLASSES = SUPPLEMENT_FIGURES_DIR / "confusion_all_classes_best_layer.pdf"
+
+# Confusion-matrix row/col ordering (presentation) — grouped by knowledge × answer-correctness
+# structure so the block pattern reads clearly, rather than alphabetical.
+SUPPLEMENT_CM_ORDER_2X2 = ["truth", "natural_deception", "capable_failed", "honest_mistake"]
+SUPPLEMENT_CM_ORDER_ALL = ["truth", "honest_mistake", "natural_deception", "capable_failed",
+                           "deception", "deception_rejection"]
 
 # Cell A: neutral 2x2 (knowledge x answer-correctness) — the clean 4-class study, no
 # deceptive-prompt confound. Cell A also runs an all-class landscape.
@@ -184,6 +209,13 @@ DO_SAMPLE = False
 
 # Batch size for activation extraction — keep at 1 to avoid padding effects on last token
 ACTIVATION_BATCH_SIZE = 1
+
+# Max tokenized (prompt+response) length during activation extraction. output_hidden_states
+# keeps every layer's hidden state for the whole sequence, so one pathological row (e.g. a
+# degenerate greedy-decoding repetition of tens of thousands of tokens) can OOM the GPU on
+# ANY card, regardless of VRAM. Legit rows here are ≤~1.5k tokens; this only truncates true
+# outliers, and left-side so the final token (the position extraction reads) is preserved.
+MAX_EXTRACT_TOKENS = 8192
 
 # ── Probe Training ────────────────────────────────────────────────────────────
 
