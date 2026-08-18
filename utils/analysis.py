@@ -457,7 +457,7 @@ def run_pca_reduction(
         try:
             from huggingface_hub import hf_hub_download
             try:
-                from huggingface_hub import enable_progress_bars
+                from huggingface_hub.utils import enable_progress_bars
                 enable_progress_bars()
             except ImportError:
                 pass

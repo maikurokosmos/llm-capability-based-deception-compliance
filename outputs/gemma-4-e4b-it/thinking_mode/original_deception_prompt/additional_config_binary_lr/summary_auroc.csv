@@ -1,0 +1,6 @@
+pair,best_auroc,best_layer,n
+natural_deception__vs__deception,1.0,11,8382
+natural_deception__vs__honest_mistake,0.614,21,5796
+capable_failed__vs__honest_mistake,0.808,23,6840
+truth__vs__natural_deception,0.847,25,6002
+truth__vs__capable_failed,0.752,25,7046
